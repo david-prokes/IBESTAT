@@ -1,0 +1,321 @@
+---
+title: "Ibestat2"
+author: "David Prokes"
+date: "2025-06-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r endo-SUT-EURO}
+rm(list=ls())
+required_packages = c("readr")
+install_and_load = function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+invisible(lapply(required_packages, install_and_load))
+##########################################################################
+########### SCRIPT DEL MÉTODO SUT-EURO-1 ###########
+###### CON TRATAMIENTO EXPLÍCITO DE LOS IMP. NETOS S/ PRODUCTOS ######
+##########################################################################
+##########################################################################
+# Elaborado por Juan Manuel Valderas Jaramillo
+# Julio/2015
+# Departamento de Economía Aplicada I
+# Universidad de Sevilla
+# Este programa efectúa la proyección de una Tablas de Origen y Destino a
+# precios básicos de acuerdo con la metodología SUT-EURO desarrollada por
+# Beutel (2008) en la que los impuestos netos de subvenciones sobre
+# los productos son tratados de manera explícita.
+# Reseteamos todo
+# Directorio de trabajo
+setwd("C:/Users/u156024/Projects/ibestat/Data/ICANE_ejemplo")
+# Toda la información para la proyección se obtiene de las siguientes matrices:
+# TO_0 es la Tabla de Origen del año de referencia (Producto x Rama) incluyendo
+# en la última columna el vector de importaciones por producto. En nuestro caso
+# como se trata de la simétrica contiene datos en la diagonal principal.
+TO_0 <- as.matrix(read_csv("TO_0_SIM_2013.csv", col_names = FALSE, show_col_types = FALSE))
+# TD_int_0 es la Tabla de Destino de los productos interiores (Producto x
+# Rama+DF), contiene tanto la demanda intermedia como final. En las 2 últimas
+# filas se incluyen tres vectores: el primero con los TLS para cada rama y la DF,
+# el segundo con el VAB para cada rama y el tercero con la producción total por
+# ramas en el caso de dos componente de demanda es la suma de los consumos
+# (interiores e importados) y los TLS para los componentes de la demanda final.
+TD_int_0 <- as.matrix(read_csv("TD_int_0_SIM_2013.csv", col_names = FALSE, show_col_types = FALSE))
+# TD_imp_0 es la Tabla de Destino de los productos importados (Producto x
+# Rama+DF), contiene tanto la demanda intermedia como final.
+TD_imp_0 <- as.matrix(read_csv("TD_imp_0_SIM_2013.csv", col_names = FALSE, show_col_types = FALSE))
+# mod es el vector con las tasas de variación objetivio. Contiene los crecimientos
+# del vab, la demanda, las M y los imp netos sobre los productos es (1x58).
+# 52 vab por ramas, 1 GCF, 1 FBK, 1 X, 1 M, 1 Imp sobre los productos, 1 VAB total
+mod <- as.numeric(unlist(read_csv("mod_2013.csv", col_names = FALSE, show_col_types = FALSE)))
+mod[is.na(mod)] <- 0
+# Información necesaria para el método. Se obtiene a partir de las matrices
+# anteriores
+# Información correspondiente al año de referencia (año 0)
+# V0 Make-Matrix (traspuesta de la tabla de Origen) (Rama x Producto)
+# Ud0 Matriz de empleos interiores de la Demanda Intermedia a p.b. (Producto x Rama)
+# Um0 Matriz de empleos importados de la Demanda Intermedia a p.b. (Producto x Rama)
+# Yd0 Matriz de empleos interiores de la Demanda Final a p.b. (Producto x Comp. D.F.)
+# Ym0 Matriz de empleos importados de la Demanda Final a p.b. (Producto x Comp. D.F.)
+# VAB0 Vector de total de valores añadidos por rama a p.b. (Rama x 1)
+# DF0 Vector con los totales de la Demanda Final por componente a
+# p.b.(Componentes de la Demanda Final x 1)
+# Sea t0 el vector de impuestos netos de subvenciones sobre los productos
+# (Rama Componentes de la DF x 1)
+# m0 vector de importaciones del año base (Productos x 1)
+# x0 Vector con la Producción Total por Ramas (Ramas x 1)
+# tM0 Escalar con Total de importaciones (1x1)
+# Información correspondiente al año de proyección (año t)
+# VABt Vector de total de valores añadidos por rama (Rama x 1)
+# VABt=csvread('VABt.csv');
+# DFt Vector con los totales de la Demanda Final por componente a
+# p.adq.(Componentes de la Demanda Final x 1)
+# DFt=csvread('DFt.csv');
+# tMt Escalar con Total de importaciones (1x1)
+# tMt=csvread('tMt.csv');
+# TLSt Escalar con el total de INSP (1x1)
+# TLSt=csvread('TLSt.csv');
+# Variables auxiliares
+# Nº de Productos Interiores, Importados y Nº de Ramas
+p <- nrow(TO_0)
+r <- ncol(TO_0) - 1
+m <- 1
+pimp <- nrow(TD_imp_0)
+f <- ncol(TD_int_0) - r
+tls <- 1
+# Vectores Auxiliares de Unos
+ir <- matrix(1, r, 1)
+ip <- matrix(1, p, 1)
+idf <- matrix(1, f, 1)
+irf <- matrix(1, r + f, 1)
+im <- matrix(1, m, 1)
+ipimp <- matrix(1, pimp, 1)
+I <- diag(p)
+# Preparando matrices
+V0 <- t(TO_0[1:p, 1:r])
+V0[is.na(V0)] = 0
+m0 <- TO_0[, ncol(TO_0), drop=FALSE]
+tM0 <- t(ipimp) %*% m0
+Ud0 <- TD_int_0[1:p, 1:r]
+Um0 <- TD_imp_0[1:pimp, 1:r]
+Yd0 <- TD_int_0[1:p, (r + 1):(r + f)]
+Ym0 <- TD_imp_0[1:pimp, (r + 1):(r + f)]
+t0 <- matrix(TD_int_0[(p + 1), 1:(r + f)], ncol = 1)
+VAB0 <- matrix(TD_int_0[p + 2, 1:r], ncol = 1)
+x0 <- matrix(TD_int_0[p + 3, 1:r], ncol = 1)
+DF0 <- matrix(TD_int_0[p + 3, (r + 1):(r + f)], ncol = 1)
+TLS0 <- t(irf) %*% t0
+# Comprobación de coherencia de la información suministrada
+if (any(abs(V0%*%ip-x0)>0.000001)) {
+error('Tabla de Origen no consistente con Producción por Ramas')
+}
+if (any(abs(t(V0)%*%ir-Ud0%*%ir-Yd0%*%idf)>0.00001)) {
+error('No existe equilibrio entre oferta de productos y demanda de productos interiores')
+}
+if (any(abs(t(m0)%*%ipimp-tM0)>0.000001)) {
+error('Vector de Importaciones inconsistente con total de importaciones')
+}
+if (any(abs(m0-Um0%*%ir-Ym0%*%idf)>0.000001)) {
+error('No existe equlibrio entre oferta y demanda de importaciones')
+}
+if (any(abs(t(Ud0)%*%ip+t(Um0)%*%ipimp+t0[1:r]-x0+VAB0)>0.00001)) {
+error('No existe equilibrio entre Consumos Intemerdios a Precios de Adquisición')
+}
+##### ERROR
+# if (any(abs(t(Yd0)%*%ip+t(Ym0)%*%ipimp+t0[(r+1):(r+f)]-DF0)>0.001)) {
+# error('No existe equilibrio en Demanda Final a precios de Adquisición')
+# }
+#####
+if (any(abs(t(t0)%*%irf-TLS0)>0.000001)) {
+error('No coincide total de INSP con TLS0');
+}
+
+# Vectores con tasas de variación objetivo
+# gv (vab de las 52 ramas de actividad)
+gv <- matrix(mod[1:length(VAB0)], ncol = 1)
+# gy (demanda GCF, FBK, X)
+gy <- matrix(mod[(length(VAB0)+1):(length(VAB0)+f)], ncol = 1)
+# gm (importaciones)
+gm <- matrix(mod[length(VAB0)+f+1], ncol = 1)
+# gtls (impuestos netos sobre los productos)
+gtls <- matrix(mod[length(mod)-1], ncol = 1)
+
+# Segregación de vectores de impuestos
+tDI0 <- t0[1:r, , drop = FALSE]
+tDF0 <- t0[(r + 1):(r + f), , drop = FALSE]
+
+# Inicio de la primera iteración
+# Primera Etapa: Obtención del market-share de la economía
+# Output por productos
+q0d <- Ud0 %*% ir + Yd0 %*% idf
+# Market-share año base
+D0 <- V0 %*% diag(1 / ifelse(as.vector(q0d) == 0, Inf, as.vector(q0d)))
+# Segunda etapa: Actualización de las tablas de Origen y de Destino
+# (Inconsistentes)
+# Definición de wf y wc
+wf <- diag(c(as.vector(gv), as.vector(gv), as.vector(gtls)))
+wc <- diag(c(as.vector(gv), as.vector(gy)))
+# Construcción de T0
+T0 <- rbind(cbind(Ud0, Yd0), cbind(Um0, Ym0), cbind(t(tDI0), t(tDF0)))
+# Matrices T1 y T2
+T1 <- wf %*% T0
+T1[is.na(T1)] <- 0
+T2 <- T0 %*% wc
+# Matriz T3
+# Versión Media Aritmética
+# T3=(T1+T2)/2;
+# Versión Media Geométrica;
+T3 <- sqrt(T1 * T2) * sign(T1)
+T3[is.na(T3)] <- 0
+# Descomposición de T3
+Ud1 <- T3[1:p, 1:r]
+Yd1 <- T3[1:p, (r + 1):(r + f)]
+Um1 <- T3[(p + 1):(p + pimp), 1:r]
+Ym1 <- T3[(p + 1):(p + pimp), (r + 1):(r + f)]
+tDI1 <- matrix(T3[p + pimp + 1, 1:r], ncol = 1)
+tDF1 <- matrix(T3[p + pimp + 1, (r + 1):(r + f)], ncol = 1)
+# Actualización del VAB
+v1 <- diag(as.vector(gv)) %*% VAB0
+# Actualización de Make-Matriz
+q1d <- Ud1 %*% ir + Yd1 %*% idf
+V1 <- D0 %*% diag(as.vector(q1d))
+# Tercera etapa: Obtención de la producción total por ramas consistente
+# Estructuras productivas
+xinp1 <- t(Ud1) %*% ip + t(Um1) %*% ipimp + v1 + tDI1
+Bd1 <- Ud1 %*% diag(1 / ifelse(as.vector(xinp1) == 0, Inf, as.vector(xinp1)))
+Bm1 <- Um1 %*% diag(1 / ifelse(as.vector(xinp1) == 0, Inf, as.vector(xinp1)))
+Btls1 <- tDI1 / as.vector(xinp1)
+Btls1[is.na(Btls1)] <- 0
+fd1 <- Yd1 %*% idf
+# Producción de equilibrio
+x2 <- solve(I - D0 %*% Bd1, D0 %*% fd1)
+# Cuarta Etapa: Nuevas tablas de Origen y de Destino consistentes
+Ud2 <- Bd1 %*% diag(as.vector(x2))
+Um2 <- Bm1 %*% diag(as.vector(x2))
+tDI2 <- Btls1 * as.vector(x2)
+Yd2 <- Yd1
+Ym2 <- Ym1
+tDF2 <- tDF1
+v2 <- x2 - t(Ud2) %*% ip - t(Um2) %*% ipimp - tDI2
+q2d <- Ud2 %*% ir + Yd2 %*% idf
+V2 <- D0 %*% diag(as.vector(q2d))
+m2 <- Um2 %*% ir + Ym2 %*% idf
+# Quinta Etapa: Comprobación de convergencia
+# Proyecciones para el VAB por ramas
+proyvab <- v2
+# Proyecciones para la DF por componentes
+proydf <- t(Yd2) %*% ip + t(Ym2) %*% ipimp + tDF2
+# Proyecciones para el total de importaciones
+proym <- t(m2) %*% ipimp
+# Proyecciones para el total de impuestos
+proyTLS <- t(tDI2) %*% ir + t(tDF2) %*% idf
+
+# Valores que deseamos conseguir
+VABt <- VAB0 * gv
+DFt <- DF0 * gy
+tMt <- tM0 * gm
+TLSt <- TLS0 * gtls
+
+# gtls (impuestos netos sobtre los productos)
+gtls <- matrix(mod[length(mod)-1], ncol = 1)
+
+# Vector de desviaciones y vector de errores
+dev <- c(VABt, DFt, tMt, TLSt) / c(proyvab, proydf, proym, proyTLS)
+dev[is.na(dev)] <- 1
+err <- dev - 1
+# Fin de la primera iteración
+# Criterio de convergencia
+# Cuenta de Iteraciones
+iter <- 1
+# Margen para Convergencia
+eps <- 0.000001
+# Factor de elasticidad del ajuste
+c <- 0.92
+# Error máximo
+Maxerror <- max(abs(err))
+# Comienzo de las segunda y sucesivas iteraciones
+# Definimos factores de crecimiento para iteración y los multiplicadores
+fv <- gv
+fy <- gy
+fm <- gv
+ftls <- gtls
+corr=matrix(1, length(dev),ncol=1)
+while (Maxerror>eps & iter<1000) {
+  for (i in 1:length(dev)){
+    if (dev[i]>=1) {
+      corr[i]=1+(abs((dev[i]-1)*100)^c)/100
+    } else {
+      corr[i]=1-(abs((1-dev[i])*100)^c)/100
+    }
+  }
+  # Factores corregidos por los multiplicadores
+  fv <- fv * corr[1:r]
+  fy <- fy * corr[(r + 1):(r + f)]
+  fm <- fm * corr[r + f + 1]
+  ftls <- ftls * corr[r + f + 2]
+  # Nuevos wf y wc. Nótese que cambia el multiplicador de las importaciones
+  wf <- diag(c(as.vector(fv), as.vector(fm), as.vector(ftls)))
+  wc <- diag(c(as.vector(fv), as.vector(fy)))
+  # Repetición del proceso de actualización
+  T1 <- wf %*% T0
+  T1[is.na(T1)] <- 0
+  # T1(isnan(T1))=0; %Al corregir el vector error T1 ya no tiene NAN
+  T2 <- T0 %*% wc
+  # T3=(T1+T2)/2;
+  # Versión Media Geométrica;
+  T3 <- sqrt(T1 * T2) * sign(T1)
+  T3[is.na(T3)] <- 0
+  Ud1 <- T3[1:p, 1:r]
+  Yd1 <- T3[1:p, (r + 1):(r + f)]
+  Um1 <- T3[(p + 1):(p + pimp), 1:r]
+  Ym1 <- T3[(p + 1):(p + pimp), (r + 1):(r + f)]
+  tDI1 <- matrix(T3[p + pimp + 1, 1:r], ncol = 1)
+  tDF1 <- matrix(T3[p + pimp + 1, (r + 1):(r + f)], ncol = 1)
+  v1 <- diag(as.vector(fv)) %*% VAB0
+  q1d <- Ud1 %*% ir + Yd1 %*% idf
+  V1 <- D0 %*% diag(as.vector(q1d))
+  xinp1 <- t(Ud1) %*% ip + t(Um1) %*% ipimp + v1 + tDI1
+  Bd1 <- Ud1 %*% diag(1 / ifelse(as.vector(xinp1) == 0, Inf,
+                                 as.vector(xinp1)))
+  Bm1 <- Um1 %*% diag(1 / ifelse(as.vector(xinp1) == 0, Inf,
+                                 as.vector(xinp1)))
+  Btls1 <- tDI1 / as.vector(xinp1)
+  Btls1[is.na(Btls1)] <- 0
+  fd1 <- Yd1 %*% idf
+  x2 <- solve(I - D0 %*% Bd1, D0 %*% fd1)
+  Ud2 <- Bd1 %*% diag(as.vector(x2))
+  Um2 <- Bm1 %*% diag(as.vector(x2))
+  tDI2 <- Btls1 * as.vector(x2)
+  Yd2 <- Yd1
+  Ym2 <- Ym1
+  tDF2 <- tDF1
+  # ERROR
+  v2 <- x2 - (t(Ud2) %*% ip + t(Um2) %*% ipimp) - tDI2
+  q2d <- Ud2 %*% ir + Yd2 %*% idf
+  V2 <- D0 %*% diag(as.vector(q2d))
+  m2 <- Um2 %*% ir + Ym2 %*% idf
+  proyvab <- v2
+  proydf <- t(Yd2) %*% ip + t(Ym2) %*% ipimp + tDF2
+  proym <- t(m2) %*% ipimp
+  proyTLS <- t(tDI2) %*% ir + t(tDF2) %*% idf
+  dev <- matrix(c(VABt, DFt, tMt, TLSt) / c(proyvab, proydf, proym, proyTLS),ncol=1)
+  dev[is.na(dev)] <- 1
+  err <- dev - 1
+  Maxerror <- max(abs(err))
+  iter <- iter + 1
+}
+
+# Exportación de resultados (matriz de destino y de origen):
+X_TST_t <- cbind(rbind(Ud2, Um2, t(tDI2), t(v2)), rbind(Yd2, Ym2, t(tDF2), matrix(0, 1, f)))
+# write.csv(as.matrix(X_TST_t), file = "X_TST_t.csv", row.names = FALSE)
+# write.csv(as.matrix(V2), file = "V_TST_t.csv", row.names = FALSE)
+```
+
+
+

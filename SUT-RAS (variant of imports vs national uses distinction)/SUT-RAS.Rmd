@@ -1,0 +1,276 @@
+---
+title: "SUT-RAS"
+author: "David Prokes"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+rm(list=ls())
+required_packages = c("data.table", "dplyr", "tidyr", "readxl","here")
+install_and_load = function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+invisible(lapply(required_packages, install_and_load))
+setwd(here())
+```
+
+```{r data}
+# STEP 1
+# Base year data:
+products = 5
+industries = 5
+categories = 3
+Pv = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!Z3:AD7",
+                          col_names = FALSE))
+Pd = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!Z11:AG15",
+                          col_names = FALSE))
+Pm = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!Z16:AG21",
+                          col_names = FALSE))
+Pv_adjusted = cbind(Pv, matrix(0, nrow = products, ncol = categories))
+colnames(Pv_adjusted) = NULL
+P = rbind(Pv_adjusted, Pd, Pm)
+Nv = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!AK3:AO7",
+                          col_names = FALSE))
+Nd = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!AK11:AR15",
+                          col_names = FALSE))
+Nm = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "IOT & SUT-RAS!AK16:AR21",
+                          col_names = FALSE))
+Nv_adjusted = cbind(Nv, matrix(0, nrow = products, ncol = categories))
+colnames(Nv_adjusted) = NULL
+N = rbind(Nv_adjusted, Nd, Nm)
+m = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", # Total TLS último valor.
+                         range = "IOT & SUT-RAS!Z24:AE24",
+                         col_names = FALSE), nrow = 1)
+s = matrix(1, nrow = (industries + categories), ncol = 1)
+rv = matrix(1, nrow = industries, ncol = 1)
+r = 1
+rd = matrix(1, nrow = products, ncol = 1)
+rm = matrix(1, nrow = (products + 1), ncol = 1)
+pd = matrix(1, nrow = products, ncol = 1)
+nd = matrix(1, nrow = products, ncol = 1)
+ps = matrix(1, nrow = (industries + categories), ncol = 1)
+ns = matrix(1, nrow = (industries + categories), ncol = 1)
+# Target year data:
+mt = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx",
+                          range = "IOT & SUT-RAS!N26:S26",
+                          col_names = FALSE), nrow = 1)
+u = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx",
+                          range = "IOT & SUT-RAS!N28:U28",
+                          col_names = FALSE), nrow = 1)
+x = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx",
+                          range = "IOT & SUT-RAS!N30:R30",
+                          col_names = FALSE), nrow = 1)
+# Projected matrices:
+Fv = matrix(0, nrow = products, ncol = industries)
+Fd = matrix(0, nrow = products, ncol = (industries + categories))
+Fm = matrix(0, nrow = (products + 1), ncol = (industries + categories))
+fm = matrix(0, nrow = 1, ncol = (products + 1))
+```
+
+```{r SUT-RAS}
+# STEP 2
+for (i in 1:products){
+  pd[i] = 0
+  nd[i] = 0
+  for (j in 1:(industries + categories)){
+    pd[i] = pd[i] + Pd[i, j] * s[j] # Demanda ponderada por producto.
+    nd[i] = nd[i] + Nd[i, j] / s[j] # Demanda negativa por producto.
+  }
+  for (j in 1:(industries)){
+    pd[i] = pd[i] + Nv[i, j] / rv[j] # Output negativo por producto
+    nd[i] = nd[i] + Pv[i, j] * rv[j] # Output ponderado por producto.
+  }
+  # Descuadre entre output y demanda por producto.
+  rd[i] = sqrt(nd[i]/pd[i])
+}
+for (i in 1:(products + 1)){
+  rm_numerator = r * m[i]
+  rm_denominator = 0
+  for (j in 1:(industries + categories)){
+    rm_numerator = rm_numerator + Nm[i, j] / s[j]
+    rm_denominator = rm_denominator + Pm[i, j] * s[j]
+  }
+  # Descuadre entre output y demanda por producto importado.
+  rm[i] = sqrt(rm_numerator / rm_denominator)
+}
+# STEP 3
+for (i in 1:industries){
+  rv[i] = 0
+  rv_numerator1 = 0
+  rv_numerator2 = 0
+  rv_denominator = 0
+  for (j in 1:products){
+    rv_numerator1 = rv_numerator1 + Pv[j, i] / rd[j]
+    rv_numerator2 = rv_numerator2 + Nv[j, i] * rd[j]
+    rv_denominator = rv_denominator + Pv[j, i] / rd[j]
+  }
+  # Proporción x (target year) / x (base year) (1 + % crecimiento).
+  rv[i] = (x[i] + sqrt(x[i]^2 + 4 * rv_numerator1 * rv_numerator2)) / (2 * rv_denominator)
+}
+for (j in 1:(industries + categories)){
+  ps[j] = 0
+  ns[j] = 0
+  for (i in 1:products){
+    ps[j] = ps[j] + rd[i] * Pd[i, j] # Uso dom. pond. por industria.
+    ns[j] = ns[j] + Nd[i, j] / rd[i] # Uso dom. neg. pond. por ind.
+  }
+  for (i in 1:(products + 1)){
+    ps[j] = ps[j] + rm[i] * Pm[i, j] # Uso imp. pond. por industria.
+    ns[j] = ns[j] + Nm[i, j] / rm[i] # Uso imp. neg. pond. por ind.
+  }
+  # Proporción u (target year) / u (base year) (1 + % crecimiento).
+  s[j] = (u[j] + sqrt(u[j]^2 + 4 * ps[j] * ns[j])) / (2 * ps[j])
+}
+r = sum(mt)
+r_denominator = 0
+for (i in 1:(products + 1)){
+  r_denominator = r_denominator + m[i] / rm[i]
+}
+r = r / r_denominator # Proporción mt / m (1 + % crecimiento).
+# Step 4: se podría hacer el bucle con pares e impares.
+```
+
+```{r convergence}
+# STEP 4
+tolerance = 1e-5
+max_iter = 100
+converged = FALSE
+iter = 0
+while (!converged && iter < max_iter){
+  iter = iter + 1
+
+  # GUARDAR VALORES ANTERIORES
+  rd_old = rd
+  rm_old = rm
+
+  ## === TU STEP 2 y STEP 3 aquí === ##
+  # STEP 2
+  for (i in 1:products){
+    pd[i] = 0
+    nd[i] = 0
+    for (j in 1:(industries + categories)){
+      pd[i] = pd[i] + Pd[i, j] * s[j] # Demanda ponderada por producto.
+      nd[i] = nd[i] + Nd[i, j] / s[j] # Demanda negativa por producto.
+    }
+    for (j in 1:(industries)){
+      pd[i] = pd[i] + Nv[i, j] / rv[j] # Output negativo por producto
+      nd[i] = nd[i] + Pv[i, j] * rv[j] # Output ponderado por producto.
+    }
+    # Descuadre entre output y demanda por producto.
+    rd[i] = sqrt(nd[i]/pd[i])
+  }
+  for (i in 1:(products + 1)){
+    rm_numerator = r * m[i]
+    rm_denominator = 0
+    for (j in 1:(industries + categories)){
+      rm_numerator = rm_numerator + Nm[i, j] / s[j]
+      rm_denominator = rm_denominator + Pm[i, j] * s[j]
+    }
+    # Descuadre entre output y demanda por producto importado.
+    rm[i] = sqrt(rm_numerator / rm_denominator)
+  }
+  # STEP 3
+  for (i in 1:industries){
+    rv[i] = 0
+    rv_numerator1 = 0
+    rv_numerator2 = 0
+    rv_denominator = 0
+    for (j in 1:products){
+      rv_numerator1 = rv_numerator1 + Pv[j, i] / rd[j]
+      rv_numerator2 = rv_numerator2 + Nv[j, i] * rd[j]
+      rv_denominator = rv_denominator + Pv[j, i] / rd[j]
+    }
+    # Proporción x (target year) / x (base year) (1 + % crecimiento).
+    rv[i] = (x[i] + sqrt(x[i]^2 + 4 * rv_numerator1 * rv_numerator2)) / (2 * rv_denominator)
+  }
+  for (j in 1:(industries + categories)){
+    ps[j] = 0
+    ns[j] = 0
+    for (i in 1:products){
+      ps[j] = ps[j] + rd[i] * Pd[i, j] # Uso dom. pond. por industria.
+      ns[j] = ns[j] + Nd[i, j] / rd[i] # Uso dom. neg. pond. por ind.
+    }
+    for (i in 1:(products + 1)){
+      ps[j] = ps[j] + rm[i] * Pm[i, j] # Uso imp. pond. por industria.
+      ns[j] = ns[j] + Nm[i, j] / rm[i] # Uso imp. neg. pond. por ind.
+    }
+    # Proporción u (target year) / u (base year) (1 + % crecimiento).
+    s[j] = (u[j] + sqrt(u[j]^2 + 4 * ps[j] * ns[j])) / (2 * ps[j])
+  }
+  r = sum(mt)
+  r_denominator = 0
+  for (i in 1:(products + 1)){
+    r_denominator = r_denominator + m[i] / rm[i]
+  }
+  r = r / r_denominator # Proporción mt / m (1 + % crecimiento).
+  ## === CRITERIO DE CONVERGENCIA === ##
+  max_diff_rd = max(abs(rd - rd_old))
+  max_diff_rm = max(abs(rm - rm_old))
+
+  converged = (max_diff_rd < tolerance) && (max_diff_rm < tolerance)
+}
+if (converged) {
+  message("SUT-RAS converged in ", iter, " iterations.")
+} else {
+  warning("SUT-RAS did not converge after ", max_iter, " iterations.")
+}
+```
+
+```{r results}
+# STEP 5
+for (i in 1:products){
+  for (j in 1:(industries + categories)){
+   Fd[i, j] = rd[i] * Pd[i, j] * s[j] - (Nd[i, j] / (rd[i] * s[j]))
+  }
+}
+for (i in 1:(products + 1)){
+  for (j in 1:(industries + categories)){
+    Fm[i, j] = rm[i] * Pm[i, j] * s[j] - (Nm[i, j] / (rm[i] * s[j]))
+  }
+}
+for (i in 1:products){
+  for (j in 1:industries){
+    Fv[i, j] = ((rv[i] * Pv[i, j]) / rd[j]) - ((rd[j] * Nv[i, j]) / rv[i])
+  }
+}
+# STEP 6
+for (i in 1:(products + 1)){
+  fm[i] = r * m[i] / rm[i]
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

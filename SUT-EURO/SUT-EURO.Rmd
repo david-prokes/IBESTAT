@@ -1,0 +1,253 @@
+---
+title: "SUT-EURO"
+author: "David Prokes"
+date: "2025-06-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+rm(list=ls())
+required_packages = c("data.table", "dplyr", "tidyr", "readxl","here")
+install_and_load = function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+invisible(lapply(required_packages, install_and_load))
+setwd(here())
+```
+
+```{r data}
+# STEP 1
+# Base year data:
+elements = 5
+categories = 3
+ir = matrix(1, nrow = elements, ncol = 1)
+ip = matrix(1, nrow = elements, ncol = 1)
+idf = matrix(1, nrow = categories, ncol = 1)
+irf = matrix(1, nrow = (elements + categories), ncol = 1)
+im = matrix(1, nrow = elements, ncol = 1)
+ipimp = matrix(1, nrow = elements, ncol = 1)
+I = diag(as.vector(rep(1, elements)))
+V0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "Projections!C3:G7",
+                          col_names = FALSE))
+V0 = t(V0)
+m0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "Projections!I3:I7",
+                          col_names = FALSE))
+tM0 = as.numeric(t(ipimp)%*%m0)
+Ud0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!C11:G15",
+                           col_names = FALSE))
+Um0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!C16:G20",
+                           col_names = FALSE))
+Yd0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!H11:J15",
+                           col_names = FALSE))
+Ym0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!H16:J20",
+                           col_names = FALSE))
+t0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!C21:J21",
+                           col_names = FALSE))
+t0 = t(t0)
+VAB0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!C22:G22",
+                           col_names = FALSE))
+VAB0 = t(VAB0)
+x0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!C23:G23",
+                           col_names = FALSE))
+x0 = t(x0)
+DF0 = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!H23:J23",
+                           col_names = FALSE))
+DF0 = t(DF0)
+tDI0 = as.matrix(t0[1:elements], ncol = 1)
+tDF0 = as.matrix(t0[(elements + 1):(elements + categories)], ncol = 1)
+TLS0 = as.numeric(t(irf) %*% t0)
+# Target year data:
+VABt = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!N22:R22",
+                           col_names = FALSE))
+VABt = t(VABt)
+DFt = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!S24:U24",
+                           col_names = FALSE))
+DFt = t(DFt)
+tMt = as.numeric(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!T8",
+                           col_names = FALSE))
+TLSt = as.numeric(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                           range = "Projections!V21",
+                           col_names = FALSE))
+```
+
+```{r SUT-EURO}
+gv = VABt / VAB0
+gy = DFt / DF0
+gm = as.numeric(tMt / tM0)
+gtls = as.numeric(TLSt / sum(t0))
+q0d = Ud0 %*% ir + Yd0 %*% idf
+q0d = as.vector(q0d)
+D0 = V0 %*% solve(diag(q0d))
+wf = diag(c(gv,gv,gtls))
+wc = diag(c(gv,gy))
+T0 = rbind(
+  cbind(Ud0, Yd0),
+  cbind(Um0, Ym0),
+  cbind(t(tDI0), t(tDF0))
+)
+T1 = wf %*% T0
+T1[is.na(T1)] = 0
+T2 = T0 %*% wc
+T3 = T1 * T2
+T3 = T3^0.5
+T3 = T3 * sign(T1)
+Ud1 = T3[1:elements, 1:elements]
+Yd1 = T3[1:elements, (elements + 1):(elements + categories)]
+Um1 = T3[(elements + 1):(elements * 2), (1:elements)]
+Ym1 = T3[(elements + 1):(elements * 2), (elements + 1):(elements + categories)]
+tDI1 = as.matrix(T3[(elements * 2 + 1), 1:elements], ncol = 1)
+tDF1 = as.matrix(T3[(elements * 2 + 1), (elements + 1):(elements + categories)], ncol = 1)
+v1 = diag(c(gv)) %*% VAB0
+q1d = Ud1 %*% ir + Yd1 %*% idf
+q1d = as.vector(q1d)
+V1 = D0 %*% diag(q1d)
+xinp1 = t(Ud1) %*% ip + t(Um1) %*% ipimp + v1 + tDI1
+xinp1 = as.vector(xinp1)
+Bd1 = Ud1 %*% solve(diag(xinp1))
+Bm1 = Um1 %*% solve(diag(xinp1))
+Btls1 = tDI1 / xinp1
+Btls1[is.na(Btls1)] = 0
+fd1 = Yd1 %*% idf
+x2 = solve(I - D0 %*% Bd1, D0 %*% fd1)
+x2 = as.vector(x2)
+Ud2 = Bd1 %*% diag(x2)
+Um2 = Bm1 %*% diag(x2)
+tDI2 = Btls1*x2
+Yd2 = Yd1
+Ym2 = Ym1
+tDF2 = tDF1
+v2 = x2 - (t(Ud2) %*% ip + t(Um2) %*% ipimp) - tDI2
+q2d = Ud2 %*% ir + Yd2 %*% idf
+q2d = as.vector(q2d)
+V2 = D0 %*% diag(q2d)
+m2 = (Um2 %*% ir + Ym2 %*% idf)
+proyvab = v2
+proydf = t(Yd2) %*% ip + t(Ym2) %*% ipimp + tDF2
+proym = as.numeric(t(m2) %*% ipimp)
+proyTLS = as.numeric(t(tDI2) %*% ir + t(tDF2) %*% idf)
+VABt = VAB0 * gv
+DFt = DF0 * gy
+tMt = tM0 * gm
+TLSt = TLS0 * gtls
+dev = as.vector(c(VABt,DFt,tMt,TLSt))/as.vector(c(proyvab,proydf,proym,proyTLS))
+dev[is.na(dev)] = 1
+err = dev - 1
+iter = 1
+eps = 0.000001
+c = 0.92
+Maxerror = max(abs(err))
+fv = gv
+fy = gy
+fm = gv
+ftls = gtls
+```
+
+```{r convergence}
+corr = as.vector(rep(1,length(dev)))
+while (Maxerror > eps){
+  for (i in 1:length(dev)){
+    if (dev[i] >= 1){
+    corr[i] = 1 + (abs((dev[i] - 1) * 100)^c) / 100
+    } else {
+    corr[i] = 1 - (abs((1 - dev[i]) * 100)^c) / 100
+    }
+  }  
+  fv = fv * corr[1:elements]
+  fy = fy * corr[(elements + 1):(elements + categories)]
+  fm = fm * corr[(elements + categories + 1)]
+  ftls = ftls * corr[(elements + categories + 2)]
+  wf = diag(c(fv,fm,ftls))
+  wc = diag(c(fv,fy))
+  T1 = wf %*% T0
+  T2 = T0 %*% wc
+  T3 = T1 * T2
+  T3 = T3^0.5
+  T3 = T3 * sign(T1)
+  Ud1 = T3[1:elements, 1:elements]
+  Yd1 = T3[1:elements, (elements + 1):(elements + categories)]
+  Um1 = T3[(elements + 1):(elements * 2), (1:elements)]
+  Ym1 = T3[(elements + 1):(elements * 2), (elements + 1):(elements + categories)]
+  tDI1 = as.matrix(T3[(elements * 2 + 1), 1:elements], ncol = 1)
+  tDF1 = as.matrix(T3[(elements * 2 + 1), (elements + 1):(elements + categories)], ncol = 1)
+  v1 = diag(c(fv)) %*% VAB0
+  q1d = Ud1 %*% ir + Yd1 %*% idf
+  q1d = as.vector(q1d)
+  V1 = D0 %*% diag(q1d)
+  xinp1 = t(Ud1) %*% ip + t(Um1) %*% ipimp + v1 + tDI1
+  xinp1 = as.vector(xinp1)
+  Bd1 = Ud1 %*% solve(diag(xinp1))
+  Bm1 = Um1 %*% solve(diag(xinp1))
+  Btls1 = tDI1 / xinp1
+  Btls1[is.na(Btls1)] = 0
+  fd1 = Yd1 %*% idf
+  x2 = solve(I - D0 %*% Bd1, D0 %*% fd1)
+  x2 = as.vector(x2)
+  Ud2 = Bd1 %*% diag(x2)
+  Um2 = Bm1 %*% diag(x2)
+  tDI2 = Btls1*x2
+  Yd2 = Yd1
+  Ym2 = Ym1
+  tDF2 = tDF1
+  v2 = x2 - (t(Ud2) %*% ip + t(Um2) %*% ipimp) - tDI2
+  q2d = Ud2 %*% ir + Yd2 %*% idf
+  q2d = as.vector(q2d)
+  V2 = D0 %*% diag(q2d)
+  m2 = (Um2 %*% ir + Ym2 %*% idf)
+  proyvab = v2
+  proydf = t(Yd2) %*% ip + t(Ym2) %*% ipimp + tDF2
+  proym = as.numeric(t(m2) %*% ipimp)
+  proyTLS = as.numeric(t(tDI2) %*% ir + t(tDF2) %*% idf)
+  dev = as.vector(c(VABt,DFt,tMt,TLSt))/as.vector(c(proyvab,proydf,proym,proyTLS))
+  dev[is.na(dev)] = 1
+  err = dev - 1
+  Maxerror = max(abs(err))
+  iter = iter + 1
+}
+```
+
+```{r results}
+X_TO_t = cbind(t(V2), m2)
+X_TDu_t = rbind(Ud2, Um2, t(tDI2), t(v2))
+X_TDu_t[is.na(X_TDu_t)] = 0
+X_TDy_t = rbind(Yd2, Ym2, t(tDF2), rep(0, categories))
+X_tD_t = t(rbind(tDI2, tDF2))
+X_v_t = t(c(v2, rep(0, categories)))
+X_TST_t = cbind(X_TDu_t, X_TDy_t)
+X_TST_t[is.na(X_TST_t)] = 0
+A_TO_0 = cbind(t(V0), m0)
+A_TDu_0 = rbind(Ud0, 
+                Um0,
+                t(tDI0))
+A_TDy_0 = rbind(Yd0, 
+                Ym0,
+                t(tDF0))
+```
+
+
+
+
+
+
+
+
+

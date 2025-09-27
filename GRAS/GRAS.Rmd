@@ -1,0 +1,164 @@
+---
+title: "GRAS"
+author: "David Prokes"
+date: "2025-06-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries}
+rm(list=ls())
+required_packages = c("data.table", "dplyr", "tidyr", "readxl","here")
+install_and_load = function(pkg) {
+  if (!require(pkg, character.only = TRUE)) {
+    install.packages(pkg)
+    library(pkg, character.only = TRUE)
+  }
+}
+invisible(lapply(required_packages, install_and_load))
+setwd(here())
+```
+
+```{r data}
+# STEP 1
+# Base year data:
+elements = 5
+categories = 3
+P = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "Projections!C67:K79",
+                          col_names = FALSE))
+P[is.na(P)] = 0
+N = matrix(0, nrow = (elements * 2 + 3), 
+           ncol = (elements + categories + 1))
+N[is.na(N)] = 0
+s = matrix(1, nrow = 1, ncol = (elements + categories))
+r = matrix(1, nrow = 1, ncol = (elements * 2 + 2))
+pr = matrix(1, nrow = 1, ncol = (elements + categories))
+nr = matrix(1, nrow = 1, ncol = (elements + categories))
+ps = matrix(1, nrow = 1, ncol = (elements * 2 + 2))
+ns = matrix(1, nrow = 1, ncol = (elements * 2 + 2))
+# Target year data:
+v = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "Projections!N79:U79",
+                          col_names = FALSE))
+u = as.matrix(read_excel(path = "../Data/SUT-RAS_example/Practice.xlsx", 
+                          range = "Projections!V67:V78",
+                          col_names = FALSE))
+# Projected matrices:
+T_matrix = matrix(0, nrow = (elements * 2 + 3), 
+           ncol = (elements + categories + 1))
+```
+
+```{r SUT-RAS}
+# STEP 2
+for (j in 1:(elements + categories)){
+  pr[j] = 0
+  nr[j] = 0
+  for (i in 1:(elements * 2 + 2)){
+    pr[j] = pr[j] + r[i] * P[i, j]
+    nr[j] = nr[j] + N[i, j] / r[i]
+  }
+}
+# STEP 3
+for (j in 1:(elements + categories)){
+  s[j] = (v[j] + sqrt(v[j]^2 + 4 * pr[j] * nr[j])) / (2 * pr[j])
+}
+# STEP 4
+for (i in 1:(elements * 2 + 2)){
+  ps[i] = 0
+  ns[i] = 0
+  for (j in 1:(elements + categories)){
+    ps[i] = ps[i] + P[i, j] * s[j]
+    ns[i] = ns[i] + N[i, j] / s[j]
+  }
+}
+# STEP 5
+for (i in 1:(elements * 2 + 2)){
+  r[i] = (u[i] + sqrt(u[i]^2 + 4 * ps[i] * ns[i])) / (2 * ps[i])
+}
+```
+
+```{r convergence}
+# STEP 6
+tolerance = 1e-8
+max_iter = 100
+converged = FALSE
+iter = 0
+while (!converged && iter < max_iter){
+  iter = iter + 1
+
+  # GUARDAR VALORES ANTERIORES
+  s_old = s
+
+  ## === TU STEP 2 al STEP 5 aquí === ##
+  # STEP 2
+  for (j in 1:(elements + categories)){
+    pr[j] = 0
+    nr[j] = 0
+    for (i in 1:(elements * 2 + 2)){
+      pr[j] = pr[j] + r[i] * P[i, j]
+      nr[j] = nr[j] + N[i, j] / r[i]
+    }
+  }
+  # STEP 3
+  for (j in 1:(elements + categories)){
+    s[j] = (v[j] + sqrt(v[j]^2 + 4 * pr[j] * nr[j])) / (2 * pr[j])
+  }
+  # STEP 4
+  for (i in 1:(elements * 2 + 2)){
+    ps[i] = 0
+    ns[i] = 0
+    for (j in 1:(elements + categories)){
+      ps[i] = ps[i] + P[i, j] * s[j]
+      ns[i] = ns[i] + N[i, j] / s[j]
+    }
+  }
+  # STEP 5
+  for (i in 1:(elements * 2 + 2)){
+    r[i] = (u[i] + sqrt(u[i]^2 + 4 * ps[i] * ns[i])) / (2 * ps[i])
+  }
+  ## === CRITERIO DE CONVERGENCIA === ##
+  max_diff_s = max(abs(s - s_old))
+
+  converged = (max_diff_s < tolerance)
+}
+if (converged) {
+  message("GRAS converged in ", iter, " iterations.")
+} else {
+  warning("GRAS did not converge after ", max_iter, " iterations.")
+}
+```
+
+```{r results}
+# STEP 7
+for (i in 1:(elements * 2 + 2)){
+ for (j in 1:(elements + categories)){
+   T_matrix[i, j] = r[i] * P[i, j] * s[j] - (N[i, j] / (r[i] * s[j]))
+ }
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
